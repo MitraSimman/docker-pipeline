@@ -5,6 +5,12 @@ phases:
     commands:
       - echo Logging in to Amazon ECR...
       - aws --version
+      - echo "=== Debugging: Listing files in current directory ==="
+      - ls -la
+      - echo "=== Current working directory ==="
+      - pwd
+      - echo "=== Checking if requirements.txt exists ==="
+      - test -f requirements.txt && echo "requirements.txt found" || echo "requirements.txt NOT found"
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - REPOSITORY_URI=$ECR_REPOSITORY_URI  
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
