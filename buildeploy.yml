@@ -21,20 +21,8 @@ phases:
       
   build:
     commands:
-      - echo Creating/Updating ECS Service via CloudFormation...
-      - echo Checking if ECS service stack exists...
       - |
-        if aws cloudformation describe-stacks --stack-name $ECS_SERVICE_STACK_NAME --region $AWS_DEFAULT_REGION >/dev/null 2>&1; then
-          echo "ECS Service stack exists, updating..."
-          ACTION="update"
-        else
-          echo "ECS Service stack does not exist, creating..."
-          ACTION="create"
-        fi
-      
-      - echo Deploying ECS service stack...
-      - |
-        aws cloudformation deploy \
+        sam deploy \
           --template-file ecs-service.yml \
           --stack-name $ECS_SERVICE_STACK_NAME \
           --parameter-overrides \
