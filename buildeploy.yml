@@ -1,63 +1,38 @@
 version: 0.2
 
-env:
-  variables:
-    # These will be set by CodeBuild project environment variables
-    # PROJECT_NAME: ecs-pipeline-test
-    # ENVIRONMENT: dev
-    # INFRA_STACK_NAME: ecs-pipeline-test-infra
-    # AWS_DEFAULT_REGION: us-east-1
-
 phases:
   pre_build:
     commands:
-      - echo Deploy phase started on `date`
-      - echo Logging in to AWS...
+      - echo Logging in to Amazon ECR...
       - aws --version
-      - aws sts get-caller-identity
-      - ECS_SERVICE_STACK_NAME="${PROJECT_NAME}-${ENVIRONMENT}-ecs-service"
-      - echo ECS Service Stack Name is $ECS_SERVICE_STACK_NAME
-      - echo Infrastructure Stack Name is $INFRA_STACK_NAME
-      
+      - ls -la
+      - echo "=== Current working directory ==="
+      - pwd
+      - echo "=== Checking if requirements.txt exists ==="
+      - test -f requirements.txt && echo "requirements.txt found" || echo "requirements.txt NOT found"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$ECR_REPOSITORY_URI  
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - echo Repository URI is $REPOSITORY_URI
+      - echo Image tag is $IMAGE_TAG
+
   build:
     commands:
-      - |
-        sam deploy \
-          --template-file ecs-service.yml \
-          --stack-name $ECS_SERVICE_STACK_NAME \
-          --parameter-overrides \
-            ProjectName=$PROJECT_NAME \
-            Environment=$ENVIRONMENT \
-            InfraStackName=$INFRA_STACK_NAME \
-          --capabilities CAPABILITY_IAM \
-          --region $AWS_DEFAULT_REGION \
-          --no-fail-on-empty-changeset
-      
-      - echo Verifying ECS service deployment...
-      - |
-        aws cloudformation wait stack-deploy-complete \
-          --stack-name $ECS_SERVICE_STACK_NAME \
-          --region $AWS_DEFAULT_REGION
-  
+      - echo Building the Docker image...
+      - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:latest
+
   post_build:
     commands:
-      - echo ECS Service deployment completed on `date`
-      - echo Getting ECS service details...
-      - |
-        ECS_SERVICE_NAME=$(aws cloudformation describe-stacks \
-          --stack-name $ECS_SERVICE_STACK_NAME \
-          --region $AWS_DEFAULT_REGION \
-          --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-          --output text)
-      - echo ECS Service Name is $ECS_SERVICE_NAME
-      - |
-        if [ ! -z "$ECS_SERVICE_NAME" ]; then
-          echo "ECS Service created/updated successfully: $ECS_SERVICE_NAME"
-        else
-          echo "Warning: Could not retrieve ECS service name"
-        fi
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - docker push $REPOSITORY_URI:latest
+      - echo Writing image definitions file...
+      - printf '[{"name":"web","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - cat imagedefinitions.json
 
 artifacts:
   files:
-    - '**/*'
-  name: DeployArtifact
+    - imagedefinitions.json
