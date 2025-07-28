@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Service for application deployment'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Name of the project'
+  
+  Environment:
+    Type: String
+    Description: 'Environment name'
+  
+  InfraStackName:
+    Type: String
+    Description: 'Infrastructure stack name for referencing outputs'
+
+Resources:
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub '${ProjectName}-${Environment}-service'
+      Cluster: 
+        Fn::ImportValue: !Sub '${InfraStackName}-ECS-Cluster'
+      TaskDefinition: 
+        Fn::ImportValue: !Sub '${InfraStackName}-TaskDefinition'
+      DesiredCount: 2
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - Fn::ImportValue: !Sub '${InfraStackName}-ECS-SecurityGroup'
+          Subnets:
+            - Fn::ImportValue: !Sub '${InfraStackName}-PrivateSubnet1-ID'
+            - Fn::ImportValue: !Sub '${InfraStackName}-PrivateSubnet2-ID'
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - ContainerName: web
+          ContainerPort: 80
+          TargetGroupArn: 
+            Fn::ImportValue: !Sub '${InfraStackName}-TargetGroup'
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-service'
+
+Outputs:
+  ECSServiceName:
+    Description: 'ECS Service Name'
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub '${AWS::StackName}-ECS-Service'
+
+  ECSServiceArn:
+    Description: 'ECS Service ARN'
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub '${AWS::StackName}-ECS-Service-ARN'

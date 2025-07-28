@@ -1,0 +1,75 @@
+version: 0.2
+
+env:
+  variables:
+    # These will be set by CodeBuild project environment variables
+    # PROJECT_NAME: ecs-pipeline-test
+    # ENVIRONMENT: dev
+    # INFRA_STACK_NAME: ecs-pipeline-test-infra
+    # AWS_DEFAULT_REGION: us-east-1
+
+phases:
+  pre_build:
+    commands:
+      - echo Deploy phase started on `date`
+      - echo Logging in to AWS...
+      - aws --version
+      - aws sts get-caller-identity
+      - ECS_SERVICE_STACK_NAME="${PROJECT_NAME}-${ENVIRONMENT}-ecs-service"
+      - echo ECS Service Stack Name is $ECS_SERVICE_STACK_NAME
+      - echo Infrastructure Stack Name is $INFRA_STACK_NAME
+      
+  build:
+    commands:
+      - echo Creating/Updating ECS Service via CloudFormation...
+      - echo Checking if ECS service stack exists...
+      - |
+        if aws cloudformation describe-stacks --stack-name $ECS_SERVICE_STACK_NAME --region $AWS_DEFAULT_REGION >/dev/null 2>&1; then
+          echo "ECS Service stack exists, updating..."
+          ACTION="update"
+        else
+          echo "ECS Service stack does not exist, creating..."
+          ACTION="create"
+        fi
+      
+      - echo Deploying ECS service stack...
+      - |
+        aws cloudformation deploy \
+          --template-file ecs-service.yml \
+          --stack-name $ECS_SERVICE_STACK_NAME \
+          --parameter-overrides \
+            ProjectName=$PROJECT_NAME \
+            Environment=$ENVIRONMENT \
+            InfraStackName=$INFRA_STACK_NAME \
+          --capabilities CAPABILITY_IAM \
+          --region $AWS_DEFAULT_REGION \
+          --no-fail-on-empty-changeset
+      
+      - echo Verifying ECS service deployment...
+      - |
+        aws cloudformation wait stack-deploy-complete \
+          --stack-name $ECS_SERVICE_STACK_NAME \
+          --region $AWS_DEFAULT_REGION
+  
+  post_build:
+    commands:
+      - echo ECS Service deployment completed on `date`
+      - echo Getting ECS service details...
+      - |
+        ECS_SERVICE_NAME=$(aws cloudformation describe-stacks \
+          --stack-name $ECS_SERVICE_STACK_NAME \
+          --region $AWS_DEFAULT_REGION \
+          --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+          --output text)
+      - echo ECS Service Name is $ECS_SERVICE_NAME
+      - |
+        if [ ! -z "$ECS_SERVICE_NAME" ]; then
+          echo "ECS Service created/updated successfully: $ECS_SERVICE_NAME"
+        else
+          echo "Warning: Could not retrieve ECS service name"
+        fi
+
+artifacts:
+  files:
+    - '**/*'
+  name: DeployArtifact
