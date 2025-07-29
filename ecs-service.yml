@@ -1,28 +1,80 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ECS Service for application deployment'
+
+Description: 'ECS Service and Task Definition for Fargate deployment'
 
 Parameters:
   ProjectName:
     Type: String
     Description: 'Name of the project'
-  
   Environment:
     Type: String
     Description: 'Environment name'
-  
   InfraStackName:
     Type: String
     Description: 'Infrastructure stack name for referencing outputs'
+  ImageTag:
+    Type: String
+    Description: 'Docker image tag to deploy'
+    Default: 'latest'
 
 Resources:
+  # Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ProjectName}-${Environment}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 1024
+      Memory: 2048
+      ExecutionRoleArn:
+        Fn::ImportValue: !Sub '${InfraStackName}-TaskExecutionRole'
+      TaskRoleArn:
+        Fn::ImportValue: !Sub '${InfraStackName}-TaskRole'
+      ContainerDefinitions:
+        - Name: web
+          Image: !Sub
+            - '${ECRUri}:${ImageTag}'
+            - ECRUri:
+                Fn::ImportValue: !Sub '${InfraStackName}-ECR-URI'
+              ImageTag: !Ref ImageTag
+          PortMappings:
+            - ContainerPort: 8080  
+              Protocol: tcp
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:
+                Fn::ImportValue: !Sub '${InfraStackName}-LogGroup'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: PORT
+              Value: '8080' 
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - "curl -f http://localhost:8080/health || exit 1" 
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-task'
+
+  # ECS Service
   ECSService:
     Type: AWS::ECS::Service
     Properties:
       ServiceName: !Sub '${ProjectName}-${Environment}-service'
-      Cluster: 
+      Cluster:
         Fn::ImportValue: !Sub '${InfraStackName}-ECS-Cluster'
-      TaskDefinition: 
-        Fn::ImportValue: !Sub '${InfraStackName}-TaskDefinition'
+      TaskDefinition: !Ref TaskDefinition
       DesiredCount: 2
       LaunchType: FARGATE
       PlatformVersion: LATEST
@@ -36,17 +88,26 @@ Resources:
           AssignPublicIp: DISABLED
       LoadBalancers:
         - ContainerName: web
-          ContainerPort: 80
-          TargetGroupArn: 
+          ContainerPort: 8080  
+          TargetGroupArn:
             Fn::ImportValue: !Sub '${InfraStackName}-TargetGroup'
       DeploymentConfiguration:
         MaximumPercent: 200
         MinimumHealthyPercent: 50
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-service'
 
 Outputs:
+  TaskDefinitionArn:
+    Description: 'Task Definition ARN'
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinition'
+
   ECSServiceName:
     Description: 'ECS Service Name'
     Value: !Ref ECSService
