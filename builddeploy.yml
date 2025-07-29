@@ -13,8 +13,14 @@ phases:
       
   build:
     commands:
+      - echo "Starting ECS service deployment..."
+
+      # Check if template file exists
+      - test -f ecs-service.yml && echo "ecs-service.yml found" || (echo "ecs-service.yml NOT found" && exit 1)
+      
+      # Deploy with better error handling
       - |
-        sam deploy \
+        if sam deploy \
           --template-file ecs-service.yml \
           --stack-name $ECS_SERVICE_STACK_NAME \
           --parameter-overrides \
@@ -23,13 +29,24 @@ phases:
             InfraStackName=$INFRA_STACK_NAME \
           --capabilities CAPABILITY_IAM \
           --region $AWS_DEFAULT_REGION \
-          --no-fail-on-empty-changeset
+          --no-fail-on-empty-changeset \
+          --debug; then
+          echo "SAM deploy completed successfully"
+        else
+          echo "SAM deploy failed - checking CloudFormation events..."
+          aws cloudformation describe-stack-events \
+            --stack-name $ECS_SERVICE_STACK_NAME \
+            --region $AWS_DEFAULT_REGION \
+            --max-items 5 || echo "Could not retrieve stack events"
+          exit 1
+        fi
       
-      - echo Verifying ECS service deployment...
+      - echo "Verifying ECS service deployment..."
       - |
         aws cloudformation wait stack-deploy-complete \
           --stack-name $ECS_SERVICE_STACK_NAME \
           --region $AWS_DEFAULT_REGION
+
   
   post_build:
     commands:
