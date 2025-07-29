@@ -18,9 +18,9 @@ phases:
       # Check if template file exists
       - test -f ecs-service.yml && echo "ecs-service.yml found" || (echo "ecs-service.yml NOT found" && exit 1)
       
-      # Deploy with better error handling
+      # Deploy ECS service using SAM
       - |
-        if sam deploy \
+        sam deploy \
           --template-file ecs-service.yml \
           --stack-name $ECS_SERVICE_STACK_NAME \
           --parameter-overrides \
@@ -30,40 +30,26 @@ phases:
           --capabilities CAPABILITY_IAM \
           --region $AWS_DEFAULT_REGION \
           --no-fail-on-empty-changeset \
-          --debug; then
-          echo "SAM deploy completed successfully"
-        else
-          echo "SAM deploy failed - checking CloudFormation events..."
-          aws cloudformation describe-stack-events \
-            --stack-name $ECS_SERVICE_STACK_NAME \
-            --region $AWS_DEFAULT_REGION \
-            --max-items 5 || echo "Could not retrieve stack events"
-          exit 1
-        fi
+          --debug
       
-      - echo "Verifying ECS service deployment..."
-      - |
-        aws cloudformation wait stack-deploy-complete \
-          --stack-name $ECS_SERVICE_STACK_NAME \
-          --region $AWS_DEFAULT_REGION
+      - echo "Displaying recent CloudFormation stack events..."
+      - aws cloudformation describe-stack-events --stack-name $ECS_SERVICE_STACK_NAME --region $AWS_DEFAULT_REGION --max-items 10 || echo "Could not retrieve stack events"
+      
+      - echo "Waiting for stack deployment to complete..."
+      - aws cloudformation wait stack-deploy-complete --stack-name $ECS_SERVICE_STACK_NAME --region $AWS_DEFAULT_REGION
 
   
   post_build:
     commands:
       - echo ECS Service deployment completed on `date`
       - echo Getting ECS service details...
-      - |
-        ECS_SERVICE_NAME=$(aws cloudformation describe-stacks \
-          --stack-name $ECS_SERVICE_STACK_NAME \
-          --region $AWS_DEFAULT_REGION \
-          --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-          --output text)
+      - ECS_SERVICE_NAME=$(aws cloudformation describe-stacks --stack-name $ECS_SERVICE_STACK_NAME --region $AWS_DEFAULT_REGION --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" --output text)
       - echo ECS Service Name is $ECS_SERVICE_NAME
       - |
-        if [ ! -z "$ECS_SERVICE_NAME" ]; then
+        if [ "$ECS_SERVICE_NAME" != "None" ] && [ ! -z "$ECS_SERVICE_NAME" ]; then
           echo "ECS Service created/updated successfully: $ECS_SERVICE_NAME"
         else
-          echo "Warning: Could not retrieve ECS service name"
+          echo "Warning: Could not retrieve ECS service name or service not found"
         fi
 
 artifacts:
